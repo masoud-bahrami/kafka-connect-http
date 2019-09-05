@@ -1,3 +1,9 @@
+//-----------------------------------------------------------------------
+// <copyright file="RestAPISourceConnector.java" Project="ir.refactor.kafka.connect.rest.http Project">
+//     Copyright (C) Author <Masoud Bahrami>. <http://www.Refactor.Ir>
+//     Github repo <https://github.com/masoud-bahrami/kafka-connect-http>
+// </copyright>
+//-----------------------------------------------------------------------
 package ir.refactor.kafka.connect.http;
 
 import java.util.ArrayList;
@@ -10,28 +16,10 @@ import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceConnector;
 
-import java.util.logging.Logger;
-
 public class RestAPISourceConnector extends SourceConnector {
-    private static Logger LOGGER = Logger.getLogger("RestAPISourceConnector.InfoLogging");
 
     public static void main(String[] args) {
-        LOGGER.info("Hello World!");
-
-        RestAPISourceTask task = new RestAPISourceTask();
-        Map<String, String> props = new HashMap<String, String>();
-        props.put(RestAPISourceConnector.RSS_URI, "http://192.168.0.116:37836/api/EventFeeder/feed/");
-        props.put(RestAPISourceConnector.TOPIC_CONFIG, "test");
-        props.put(RestAPISourceConnector.TAKE_CONFIG, "5");
-        task.start(props);
-
-        try {
-            task.poll();
-            task.poll();
-            task.poll();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+        Logger.logInfo("Hello World!");
     }
 
     public static final String TOPIC_CONFIG = "topic";
@@ -46,26 +34,26 @@ public class RestAPISourceConnector extends SourceConnector {
 
     @Override
     public void start(Map<String, String> configProps) {
-        LOGGER.info("Start RestAPISourceConnector.start .....");
+        Logger.logInfo("Start RestAPISourceConnector.start .....");
 
         rssUri = configProps.get(RSS_URI);
-        LOGGER.info("At Connector.start rssUri = " + rssUri);
+        Logger.logInfo("At RestAPISourceConnector.start rssUri = " + rssUri);
         topic = configProps.get(TOPIC_CONFIG);
-        LOGGER.info("At Connector.start topic = " + topic);
+        Logger.logInfo("At RestAPISourceConnector.start topic = " + topic);
         if (topic == null || topic.isEmpty())
         {
-            LOGGER.info("FileStreamSourceConnector configuration must include 'topic' setting" );
+            Logger.logInfo("RestAPISourceConnector.start FileStreamSourceConnector configuration must include 'topic' setting" );
 
-            throw new ConnectException("FileStreamSourceConnector configuration must include 'topic' setting");
+            throw new ConnectException("RestAPISourceConnector.start FileStreamSourceConnector configuration must include 'topic' setting");
         }
         if (topic.contains(","))
         {
-            LOGGER.info("FileStreamSourceConnector should only have a single topic when used as a source.");
+            Logger.logInfo("RestAPISourceConnector.start FileStreamSourceConnector should only have a single topic when used as a source.");
 
             throw new ConnectException(
-                    "FileStreamSourceConnector should only have a single topic when used as a source.");
+                    "RestAPISourceConnector.start FileStreamSourceConnector should only have a single topic when used as a source.");
         }
-        LOGGER.info("End RestAPISourceConnector.start");
+        Logger.logInfo("End RestAPISourceConnector.start");
 
     }
 
@@ -77,26 +65,26 @@ public class RestAPISourceConnector extends SourceConnector {
     // to actually read the data:
     @Override
     public Class<? extends Task> taskClass() {
-        LOGGER.info("Start RestAPISourceConnector.taskClass");
+        Logger.logInfo("Start RestAPISourceConnector.taskClass");
         return RestAPISourceTask.class;
     }
 
     @Override
     public List<Map<String, String>> taskConfigs(int maxTasks) {
-        LOGGER.info("Start RestAPISourceConnector.taskConfigs ......");
+        Logger.logInfo("Start RestAPISourceConnector.taskConfigs ......");
         ArrayList<Map<String, String>> configs = new ArrayList<Map<String, String>>();
         // Only one input stream makes sense.
         Map<String, String> config = new HashMap<String, String>();
         if (rssUri != null)
         {
-            LOGGER.info("At RestAPISourceConnector.taskConfigs. Adding rssUri to config. rssUri = "  + rssUri);
+            Logger.logInfo("At RestAPISourceConnector.taskConfigs. Adding rssUri to config. rssUri = "  + rssUri);
             config.put(RSS_URI, rssUri);
         }
-        LOGGER.info("At RestAPISourceConnector.taskConfigs. Adding topic to config. topic = " + topic);
+        Logger.logInfo("At RestAPISourceConnector.taskConfigs. Adding topic to config. topic = " + topic);
         config.put(TOPIC_CONFIG, topic);
-        LOGGER.info("At RestAPISourceConnector.taskConfigs. Adding config to configs");
+        Logger.logInfo("At RestAPISourceConnector.taskConfigs. Adding config to configs");
         configs.add(config);
-        LOGGER.info("End RestAPISourceConnector.taskConfigs");
+        Logger.logInfo("End RestAPISourceConnector.taskConfigs");
         return configs;
     }
 
@@ -117,7 +105,7 @@ public class RestAPISourceConnector extends SourceConnector {
                 .define(RSS_URI, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, ConfigDef.Importance.HIGH,
                         HTTP_API_URL_DOC, CONNECTION_GROUP, 1, ConfigDef.Width.LONG, HTTP_API_URL_DISPLAY)
 
-                // Retries
+                // Take
                 .define(TAKE_CONFIG, ConfigDef.Type.INT, TAKE_CONFIG_DEFAULT, NON_NEGATIVE_INT_VALIDATOR,
                         ConfigDef.Importance.MEDIUM, TAKE_CONFIG_DOC, TAKE_CONFIG_GROUP, 1, ConfigDef.Width.SHORT,
                         TAKE_CONFIG_DISPLAY)

@@ -1,35 +1,30 @@
+//-----------------------------------------------------------------------
+// <copyright file="RestAPISourceTask.java" Project="ir.refactor.kafka.connect.rest.http Project">
+//     Copyright (C) Author <Masoud Bahrami>. <http://www.Refactor.Ir>
+//     Github repo <https://github.com/masoud-bahrami/kafka-connect-http>
+// </copyright>
+//-----------------------------------------------------------------------
 package ir.refactor.kafka.connect.http;
 
 import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
 
 import org.apache.http.HttpResponse;
-import org.apache.http.ParseException;
-import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.client.methods.HttpUriRequest;
-import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
 import org.json.JSONArray;
-import org.json.JSONException;
 import org.json.JSONObject;
 
 public class RestAPISourceTask extends SourceTask {
-    private static Logger LOGGER = Logger.getLogger("RestAPISourceTask.InfoLogging");
     private String topic;
     private URI rssURL;
     private Integer take;
@@ -38,327 +33,241 @@ public class RestAPISourceTask extends SourceTask {
     private Long last_execution = 0L;
     private Boolean hasNext = false;
 
+    private String version = "1.0.0-snapshot";
+
     public String version() {
-        return "1.0.0";
+        return version;
     }
 
     @Override
     public void start(Map<String, String> props) {
-        LOGGER.info("Start RestAPISourceTask.start .....");
-        LOGGER.info("At RestAPISourceTask.start calling createConfigFileIfNotExist()");
-        createConfigFileIfNotExist();
+        Logger.logInfo("Start RestAPISourceTask.start .....");
+
+        topic = props.get(RestAPISourceConnector.TOPIC_CONFIG);
+        Logger.logInfo("At RestAPISourceTask.start topic = " + topic);
+        if (topic == null) {
+            Logger.logInfo("At RestAPISourceTask.start topic null exception");
+            throw new ConnectException("FileStreamSourceTask config missing topic setting");
+        }
+
+        Logger.logInfo("At RestAPISourceTask.start calling createConfigFileIfNotExist()");
+        ConfigService.createConfigFileIfNotExist(configFileName());
+
         try {
-            LOGGER.info("At RestAPISourceTask.start calling getLastFeedPoint()");
-            from =getLastFeedPoint();
-            LOGGER.info("At RestAPISourceTask.start from = " + from);
+            Logger.logInfo("At RestAPISourceTask.start calling getLastFeedPoint()");
+            from = ConfigService.getLastFeedPoint(configFileName());
+            Logger.logInfo("At RestAPISourceTask.start from = " + from);
         } catch (Exception ex) {
-             try {
-                throw ex;
-            } catch (Exception e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
+            from=0;
+            Logger.logInfo("At RestAPISourceTask.start calling  getLastFeedPoint() got an error. ".concat(ex.getMessage()) );
         }
-
-        String uri = props.get(RestAPISourceConnector.RSS_URI);
-        LOGGER.info("At RestAPISourceTask.start uri = " + uri);
 
         try {
-            rssURL = new URI(uri);
-            LOGGER.info("At RestAPISourceTask.start rssURL = " + rssURL);
-
+            rssURL = new URI(props.get(RestAPISourceConnector.RSS_URI));
+            Logger.logInfo("At RestAPISourceTask.start rssURL = " + rssURL);
         } catch (URISyntaxException e) {
-            LOGGER.info("At RestAPISourceTask.start error occurred in creating new URI " + e.getMessage());
+            Logger.logInfo("At RestAPISourceTask.start error occurred in creating new URI " + e.getMessage());
         }
 
-        if (rssURL == null)
-        {
-            LOGGER.info("At RestAPISourceTask.start rssURL null exception" );
+        if (rssURL == null) {
+            Logger.logInfo("At RestAPISourceTask.start rssURL null exception");
             throw new RuntimeException("At RestAPISourceTask.start rssURL null exception");
         }
 
-        topic = props.get(RestAPISourceConnector.TOPIC_CONFIG);
-        LOGGER.info("At RestAPISourceTask.start topic = " + topic );
-        if (topic == null) {
-            LOGGER.info("At RestAPISourceTask.start topic null exception" );
-
-            throw new ConnectException("FileStreamSourceTask config missing topic setting");
-        }try {
-
+        try {
             take = Integer.parseInt(props.get(RestAPISourceConnector.TAKE_CONFIG));
-            LOGGER.info("At RestAPISourceTask.start. getting take from props. take = " + take );
+            Logger.logInfo("At RestAPISourceTask.start. getting take from props. take = " + take);
 
             if (take == 0)
                 take = 20;
-
         } catch (Exception ex) {
             take = 20;
         }
-        LOGGER.info("End RestAPISourceTask.start.");
+
+        Logger.logInfo("End RestAPISourceTask.start.");
+    }
+
+    private void updateLastExecution() {
+        last_execution = System.currentTimeMillis();
     }
 
     @Override
     public List<SourceRecord> poll() throws InterruptedException {
-        last_execution = System.currentTimeMillis();
-        LOGGER.info("Start RestAPISourceTask.poll .....");
-        HttpClient client = HttpClientBuilder.create().build();
-        try {
-            LOGGER.info("At RestAPISourceTask.poll. Getting from  by calling getLastFeedPoint()");
-            from =getLastFeedPoint();
-        } catch (Exception e1) {
-            LOGGER.info("At RestAPISourceTask.poll. An error occured in calling getLastFeedPoint()");
-            LOGGER.info("At RestAPISourceTask.poll. Set from to 0");
-            from = 0;
-            e1.printStackTrace();
+        updateLastExecution();
+        Logger.logInfo("Start RestAPISourceTask.poll .....");
+        Logger.logInfo("At RestAPISourceTask.poll calling initialFromIndex");
+        initialFromIndex();
+
+        if (!hasNext && !tellMeIfThereAreAnyNewEvents()) {
+            return Collections.EMPTY_LIST;
         }
-
-
-        if (!hasNext) {
-            LOGGER.info("At RestAPISourceTask.poll. hasNext = false");
-            HttpUriRequest httpUriRequest = new HttpGet(rssURL + "/nextPage/" + from.toString());
-            LOGGER.info("At RestAPISourceTask.poll. creating EventFeedUrl. " + httpUriRequest.getURI());
-            // hasNextPage
-            // nextFrom
-            // nextTake
-            // NextLink
-            HttpResponse rsp = null;
-            try {
-                LOGGER.info("At RestAPISourceTask.poll. Executing http get request");
-
-                rsp = client.execute(httpUriRequest);
-            } catch (ClientProtocolException e) {
-                LOGGER.info("At RestAPISourceTask.poll. Error in Executing http get request " + e.getMessage());
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            } catch (IOException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
-
-            String str = "";
-            try {
-                str = EntityUtils.toString(rsp.getEntity());
-            } catch (ParseException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            } catch (IOException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
-            JSONObject jObj = null;
-            try {
-                jObj = new JSONObject(str);
-            } catch (JSONException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
-
-            try {
-                hasNext = jObj.getBoolean("hasNextPage");
-            } catch (JSONException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
-
-            LOGGER.info("At RestAPISourceTask.poll. hasNext = " + hasNext);
-
-            if (!hasNext)
-            {
-                LOGGER.info("At RestAPISourceTask.poll. There is no any events return empty list");
-                return Collections.EMPTY_LIST;
-            }
-        }
-        HttpUriRequest httpUriRequest = new HttpGet(rssURL + "/" + from.toString() + "/" + take.toString());
-        LOGGER.info("At RestAPISourceTask.poll. Creating fething rss url " + httpUriRequest.getURI());
 
         HttpResponse response = null;
         try {
-            LOGGER.info("At RestAPISourceTask.poll. Start executing httpRequest to feth events");
-
-            response = client.execute(httpUriRequest);
-
-            LOGGER.info("At RestAPISourceTask.poll. End executing httpRequest. Response is " + response);
-
-        } catch (ClientProtocolException e) {
-            LOGGER.info("At RestAPISourceTask.poll. ClientProtocolException !! " + e.getMessage());
-        } catch (IOException e) {
-            LOGGER.info("At RestAPISourceTask.poll. IOException !! " + e.getMessage());
+            Logger.logInfo("At RestAPISourceTask.poll. Start calling HttpClientUtility.get() with  url parameter = " + eventFeedUrl());
+            response = HttpClientUtility.get(eventFeedUrl());
+            Logger.logInfo("At RestAPISourceTask.poll. End executing httpRequest. Response is " + response);
+        } catch (Exception e) {
+            Logger.logInfo("At RestAPISourceTask.poll. Executing http request got  Exception " + e.getMessage());
         }
 
-        String json_string = null;
         try {
-            LOGGER.info("At RestAPISourceTask.poll. Start get response body " );
+            Logger.logInfo("At RestAPISourceTask.poll. Start convert response message to JSONOBJECT");
+            JSONObject eventsJsonObject = new JSONObject(EntityUtils.toString(response.getEntity()));
+            Logger.logInfo("At RestAPISourceTask.poll. End convert response message to JSONOBJECT");
 
-            json_string = EntityUtils.toString(response.getEntity());
-            LOGGER.info("At RestAPISourceTask.poll. End get response body " );
-        } catch (ParseException e) {
-            LOGGER.info("At RestAPISourceTask.poll. ParseException!! "  + e.getMessage());
-            e.printStackTrace();
-        } catch (IOException e) {
-            LOGGER.info("At RestAPISourceTask.poll. IOException!! "  + e.getMessage());
-        }
-        try {
-            LOGGER.info("At RestAPISourceTask.poll. Start convert response message to JSONOBJECT");
-            JSONObject eventsJsonObject = new JSONObject(json_string);
-            LOGGER.info("At RestAPISourceTask.poll. End convert response message to JSONOBJECT");
+            hasNext = eventsJsonObject.getBoolean(HalEventResponseConsts.HAS_NEXT_PAGE_TITLE);
+            Logger.logInfo("At RestAPISourceTask.poll. hasNext " + hasNext);
 
-            hasNext = eventsJsonObject.getBoolean("hasNextPage");
-            LOGGER.info("At RestAPISourceTask.poll. hasNext " + hasNext);
-            if (hasNext) {
-                Integer newFrom = Integer.parseInt(eventsJsonObject.getString("nextFrom"));
-                Integer newTake = Integer.parseInt(eventsJsonObject.getString("nextTake"));
-
-                // String nextUrl = eventsJsonObject.getJSONObject("_links").getString("next");
-
-                LOGGER.info("At RestAPISourceTask.poll. Start calling  storeLastFedPoint() newFrom = " + newFrom + " newTake=" +newTake);
-                storeLastFedPoint(newFrom, newTake);
-                LOGGER.info("At RestAPISourceTask.poll. End calling  storeLastFedPoint()");
-            } else {
-
-                Integer totalCount = Integer.parseInt(eventsJsonObject.getString("totalEvents"));
-                LOGGER.info("At RestAPISourceTask.poll. Start calling  storeLastFedPoint() newFrom = " + totalCount + " newTake=" +totalCount);
-                storeLastFedPoint(totalCount, totalCount);
-                LOGGER.info("At RestAPISourceTask.poll. End calling  storeLastFedPoint()");
-            }
-
-            LOGGER.info("At RestAPISourceTask.poll. Start extracting _embedded from JSONOBJECT");
-            JSONArray events = eventsJsonObject.getJSONObject("_embedded").getJSONArray("events");
-            LOGGER.info("At RestAPISourceTask.poll. End extracting _embedded from JSONOBJECT");
-
-            // String nextUrl = eventsJsonObject.getJSONObject("_links").getString("next");
+            Logger.logInfo("At RestAPISourceTask.poll. Start extracting _embedded from JSONOBJECT");
+            JSONArray events = eventsJsonObject.getJSONObject(HalEventResponseConsts.EMBEDDED_PORTION_TITLE).getJSONArray(HalEventResponseConsts.EMBEDDED_EVENTS_TITLE);
+            Logger.logInfo("At RestAPISourceTask.poll. End extracting _embedded from JSONOBJECT");
 
             List<SourceRecord> records;
             if (events != null) {
-                LOGGER.info("At RestAPISourceTask.poll. Response contains " + events.length() + " Events ");
+                Logger.logInfo("At RestAPISourceTask.poll. Response contains " + events.length() + " Events ");
                 records = new ArrayList<SourceRecord>(events.length());
 
-                LOGGER.info("At RestAPISourceTask.poll. Start creating SourceRecord array");
+                Logger.logInfo("At RestAPISourceTask.poll. Start creating SourceRecord array");
 
                 for (int i = 0; i < events.length(); i++) {
-                    LOGGER.info("At RestAPISourceTask.poll. Start Creating a new eventObject");
+                    Logger.logInfo("At RestAPISourceTask.poll. Start Creating a new eventObject");
                     Object eventObject = events.get(i);
-                    LOGGER.info("At RestAPISourceTask.poll. End Creating new eventObject " + eventObject);
-                    Map<String, Object> sourcePartition = new HashMap<String, Object>();
-                    sourcePartition.put("importFrom", "eventFeeder");
-                    sourcePartition.put("source", SOURCE);
-
-                    Map<String, Object> offset = new HashMap<String, Object>();
-                    offset.put("last_execution", last_execution);
-
-                    LOGGER.info("At RestAPISourceTask.poll. Create a new SourceRecord");
-
-                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                    ObjectOutput out = null;
-                    byte[] eventObjectBytes;
-                    try {
-                        try {
-                            out = new ObjectOutputStream(bos);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                        try {
-                            out.writeObject(eventObject);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                        try {
-                            out.flush();
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                        eventObjectBytes = bos.toByteArray();
-                    } finally {
-                        try {
-                            bos.close();
-                        } catch (IOException ex) {
-                            // ignore close exception
-                        }
-                    }
-
-                    SourceRecord sourceRecord = new SourceRecord(sourcePartition,
-                            offset,
-                            topic,
-                            Schema.BYTES_SCHEMA,
-                            eventObjectBytes);
+                    Logger.logInfo("At RestAPISourceTask.poll. Start calling createSourceRecord() with parameter ".concat(eventObject.toString()));
+                    SourceRecord sourceRecord = createSourceRecord(eventObject, topic);
 
                     records.add(sourceRecord);
                 }
-                LOGGER.info("At RestAPISourceTask.poll. End creating SourceRecord array");
+                Logger.logInfo("At RestAPISourceTask.poll. End creating SourceRecord array");
+
+                if (hasNext) {
+                    Integer newFrom = Integer.parseInt(eventsJsonObject.getString(HalEventResponseConsts.NEXT_FROM_TITLE));
+                    Integer newTake = Integer.parseInt(eventsJsonObject.getString(HalEventResponseConsts.NEXT_TAKE_TITLE));
+
+                    Logger.logInfo("At RestAPISourceTask.poll. Start calling  storeLastFedPoint() newFrom = " + newFrom + " newTake=" + newTake);
+                    ConfigService.storeLastFedPoint(configFileName(), newFrom);
+                    Logger.logInfo("At RestAPISourceTask.poll. End calling  storeLastFedPoint()");
+                } else {
+                    Integer totalCount = Integer.parseInt(eventsJsonObject.getString(HalEventResponseConsts.TOTAL_EVENTS_TITLE));
+                    Logger.logInfo("At RestAPISourceTask.poll. Start calling  storeLastFedPoint() newFrom = " + totalCount + " newTake=" + totalCount);
+                    ConfigService.storeLastFedPoint(configFileName(), totalCount);
+                    Logger.logInfo("At RestAPISourceTask.poll. End calling  storeLastFedPoint()");
+                }
+
                 return records;
             }
-        } catch (JSONException e) {
-            LOGGER.info("At RestAPISourceTask.poll. JSONException " + e.getMessage());
+        } catch (Exception e) {
+            Logger.logInfo("At RestAPISourceTask.poll. Unhandled Exception occurred !!!" + e.getMessage());
         }
         return Collections.EMPTY_LIST;
+    }
+
+    private SourceRecord createSourceRecord(Object eventObject, String topic) {
+        Logger.logInfo("Start RestAPISourceTask.createSourceRecord...");
+        Map<String, Object> sourcePartition = new HashMap<String, Object>();
+        sourcePartition.put("importFrom", "eventFeeder");
+        sourcePartition.put("source", SOURCE);
+
+        Map<String, Object> offset = new HashMap<String, Object>();
+        offset.put("last_execution", last_execution);
+
+        Logger.logInfo("At RestAPISourceTask.createSourceRecord. Calling giveMeBinaryFormatOf() with parameter = ".concat(eventObject.toString()));
+
+        byte[] eventObjectBytes = giveMeBinaryFormatOf(eventObject);
+        Logger.logInfo("At RestAPISourceTask.createSourceRecord. Create a new SourceRecord");
+
+        return new SourceRecord(sourcePartition,
+                                offset,
+                                topic,
+                                Schema.BYTES_SCHEMA,
+                                eventObjectBytes);
+    }
+
+    private byte[] giveMeBinaryFormatOf(Object object) {
+        Logger.logInfo("Start RestAPISourceTask.giveMeBinaryFormatOf...");
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+
+        byte[] eventObjectBytes = null;
+        try {
+            ObjectOutput objectOutput = new ObjectOutputStream(outputStream);
+            objectOutput.writeObject(object);
+            objectOutput.flush();
+
+            eventObjectBytes = outputStream.toByteArray();
+        } catch (Exception e) {
+            Logger.logInfo("At RestAPISourceTask.giveMeBinaryFormatOf. Exception occured in converting object to byte[]".concat(e.getMessage()));
+        } finally {
+            try {
+                outputStream.close();
+            } catch (Exception ex) {
+                // ignore close exception
+            }
+        }
+        return eventObjectBytes;
+    }
+
+    private boolean tellMeIfThereAreAnyNewEvents() {
+        Logger.logInfo("Start RestAPISourceTask.tellMeIfThereAreAnyNewEvents....");
+
+        HttpResponse rsp = null;
+        try {
+            Logger.logInfo("At RestAPISourceTask.tellMeIfThereAreAnyNewEvents. Calling HttpClientUtility.Get");
+
+            rsp = HttpClientUtility.get(nextPageOFEventUrl());
+        } catch (Exception e) {
+            Logger.logInfo("At RestAPISourceTask.poll. Executing http got Exception " + e.getMessage());
+        }
+
+        try {
+            String str = EntityUtils.toString(rsp.getEntity());
+            Logger.logInfo("At RestAPISourceTask.poll. Start deserializing response body to JsonObject. Response body is = {" + str + " }");
+
+            JSONObject jObj = new JSONObject(str);
+            Logger.logInfo("At RestAPISourceTask.poll. End deserializing response body to JsonObject. JsonObject is " + jObj);
+
+            hasNext = jObj.getBoolean("hasNextPage");
+        } catch (Exception e) {
+            Logger.logInfo("At RestAPISourceTask.tellMeIfThereAreAnyNewEvents. Exception " + e.getMessage());
+        }
+
+        if (!hasNext) {
+            Logger.logInfo("At RestAPISourceTask.tellMeIfThereAreAnyNewEvents. There is no any events return empty list");
+        }
+
+        Logger.logInfo("End RestAPISourceTask.tellMeIfThereAreAnyNewEvents");
+        return hasNext;
+    }
+
+    private String nextPageOFEventUrl() {
+        return rssURL + "/nextPage/" + from.toString();
+    }
+
+    private String eventFeedUrl() {
+        return rssURL + "/" + from.toString() + "/" + take.toString();
+    }
+
+    private void initialFromIndex() {
+        try {
+            Logger.logInfo("Start RestAPISourceTask.initialFrom. Getting from  by calling getLastFeedPoint()");
+            from = ConfigService.getLastFeedPoint(configFileName());
+        } catch (Exception e1) {
+            Logger.logInfo("At RestAPISourceTask.initialFrom. An error occurred in calling getLastFeedPoint()" + e1.getMessage());
+            Logger.logInfo("At RestAPISourceTask.initialFrom. Set from to 0");
+            from = 0;
+        }
+    }
+
+    private String configFileName() {
+        Logger.logInfo("Start RestAPISourceTask.configFileName() ...");
+
+        Logger.logInfo("Start RestAPISourceTask.configFileName(). Topic is ".concat(topic));
+        String fileName = topic.concat("config");
+        Logger.logInfo("Start RestAPISourceTask.configFileName(). File name is ".concat(fileName));
+        return fileName;
     }
 
     @Override
     public void stop() {
     }
-
-    private void storeLastFedPoint(Integer from, Integer take) {
-        LOGGER.info("Starting RestAPISourceTask.storeLastFedPoint...");
-        Writer out = null;
-        try {
-            out = new BufferedWriter(new OutputStreamWriter(new FileOutputStream("config"), "UTF-8"));
-        } catch (UnsupportedEncodingException e) {
-            // TODO Auto-generated catch block
-            LOGGER.info("At RestAPISourceTask.storeLastFedPoint. UnsupportedEncodingException =" + e.getMessage());
-
-        } catch (FileNotFoundException e) {
-            LOGGER.info("At RestAPISourceTask.storeLastFedPoint. FileNotFoundException =" + e.getMessage());
-        }
-        try {
-            try {
-                out.write(from.toString());
-            } catch (IOException e) {
-                LOGGER.info("At RestAPISourceTask.storeLastFedPoint. IOException =" + e.getMessage());
-            }
-        } finally {
-            try {
-                out.close();
-            } catch (IOException e) {
-                LOGGER.info("At RestAPISourceTask.storeLastFedPoint. Closing config file. IOException =" + e.getMessage());
-
-            }
-        }
-        LOGGER.info("End RestAPISourceTask.storeLastFedPoint...");
-    }
-
-    public Integer getLastFeedPoint() throws IOException {
-        LOGGER.info("Start RestAPISourceTask.getLastFeedPoint ....");
-
-        String content;
-
-        byte[] bytes = Files.readAllBytes(Paths.get("config"));
-        content = new String(bytes);
-
-        // String[] result = content.split(seperator.toString());
-
-        Integer lastFedPoint = Integer.parseInt(content);
-        LOGGER.info("At RestAPISourceTask.getLastFeedPoint lastFedPoint = " + lastFedPoint);
-        LOGGER.info("End RestAPISourceTask.getLastFeedPoint ....");
-        return lastFedPoint;
-    }
-
-    public void createConfigFileIfNotExist() {
-        LOGGER.info("Start RestAPISourceTask.createConfigFileIfNotExist ....");
-        File f = new File("config");
-        if (!f.exists()) {
-            try {
-                LOGGER.info("At RestAPISourceTask.createConfigFileIfNotExist, config file not exist. Trying to create a new config file....");
-                f.createNewFile();
-            } catch (IOException e) {
-                LOGGER.info("At RestAPISourceTask.createConfigFileIfNotExist, creating config file failed. " + e.getMessage());
-
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
-        } else {
-            LOGGER.info("At RestAPISourceTask.createConfigFileIfNotExist, Config File already exists");
-        }
-        LOGGER.info("End RestAPISourceTask.createConfigFileIfNotExist");
-
-    }
-
 }
